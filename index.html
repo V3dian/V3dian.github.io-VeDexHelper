@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>IC Builder Sandbox — grouped + ICWORDS + Notes</title>
+<style>
+  :root { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+  body { margin: 18px; color:#111; }
+  h1 { margin: 0 0 8px 0; font-size: 20px; }
+  .controls { margin: 10px 0 18px; }
+  .btn { background:#eee; border:1px solid #bbb; padding:6px 10px; margin-right:6px; cursor:pointer; color:black; }
+  .btn:active{transform: translateY(1px);}
+  .groups { display:flex; flex-wrap:wrap; gap:12px; }
+  .group { border:1px solid #ccc; padding:10px; border-radius:6px; min-width:280px; background:#fafafa;}
+  .group h3 { margin:0 0 8px 0; font-size:16px; display:flex; justify-content:space-between; align-items:center;}
+  table { width:100%; border-collapse:collapse; margin-bottom:8px; }
+  th, td { border-bottom:1px dashed #ddd; padding:6px 4px; text-align:left; font-size:13px; vertical-align:top; }
+  th { font-weight:600; font-size:13px; color:#333 }
+  input[type="text"], input[type="number"] { padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px; width:100%; box-sizing:border-box; }
+  .small { width:70px; }
+  footer { margin-top:14px; font-size:13px; color:#333; }
+  pre { background:#111; color:#d6ffd6; padding:10px; border-radius:6px; overflow:auto; max-height:220px; white-space:pre-wrap; word-wrap:break-word;}
+  .row-actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .muted { color:#666; font-size:13px; }
+  .ic-words { background:#f3f3f3; border:1px solid #ddd; padding:8px; border-radius:6px; max-height:180px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+  .copy-btn { margin-left:6px; padding:6px 8px; cursor:pointer; color:black; }
+  label.small { font-size:13px; color:#333; margin-right:6px; }
+  textarea.note { width:100%; min-height:60px; box-sizing:border-box; border:1px solid #bbb; border-radius:4px; padding:6px; font-size:13px; resize:vertical; }
+  .note-container { margin-top:6px; display:none; }
+  .note-container.visible { display:block; }
+</style>
+</head>
+<body>
+  <h1>IC Builder Sandbox (grouped) — ICWORDS + Notes</h1>
+
+  <div class="controls">
+    <button class="btn" onclick="addGroup()">+ Add Group</button>
+    <button class="btn" onclick="addSample()">+ Add Sample Groups</button>
+    <button class="btn" onclick="randomizeAll()">Randomize All</button>
+    <button class="btn" onclick="generateEchoPreview()">Generate Preview</button>
+    <button class="btn" onclick="updateICWords()">Refresh ICWORDS</button>
+  </div>
+
+  <div id="groupsWrap" class="groups"></div>
+
+  <footer>
+    <div><strong>Total bits:</strong> <span id="totalBits">0</span></div>
+    <div><strong>Estimated words (bytes):</strong> <span id="totalWords">0</span></div>
+    <div style="margin-top:8px"><strong>IC_BIT_LENGTHS array (copy):</strong></div>
+    <pre id="bitArray">const IC_BIT_LENGTHS = [];</pre>
+
+    <div style="margin-top:8px"><strong>ICWORDS (encoded packed words) — copy/paste into echo block:</strong>
+      <button class="btn copy-btn" onclick="copyICWords()">Copy</button>
+    </div>
+    <div class="ic-words" id="icWords">(no words yet)</div>
+
+    <div style="margin-top:8px" class="muted">Tip: each stat now supports personal notes — use the “Note” button next to it.</div>
+  </footer>
+
+<script>
+const WList = ["the","be","to","of","and","a","in","that","have","i","it","for","not","on","with","he","as","you","do","at","this","but","his","by","from","they","we","say","her","she","or","an","will","my","one","all","would","there","their","what","so","up","out","if","about","who","get","which","go","me","when","make","can","like","time","no","just","him","know","take","people","into","year","your","good","some","could","them","see","other","than","then","now","look","only","come","its","over","think","also","back","after","use","two","how","our","work","first","well","way","even","new","want","because","any","these","give","day","most","us","is","are","was","were","had","does","did","such","many","much","own","need","feel","seem","help","stay","hold","keep","let","put","set","play","run","move","live","call","try","ask","show","bring","write","read","watch","eat","drink","sleep","buy","sell","pay","meet","open","close","start","stop","turn","change","fall","rise","sit","stand","walk","drive","ride","fly","build","break","free","true","real","right","left","long","short","big","small","old","young","high","low","hard","soft","hot","cold","fast","slow","near","far","early","late","rich","poor","safe","same","each","every","whole","part","mind","body","heart","head","hand","eye","face","hope","love","hate","wish","plan","goal","risk","save","lose","win","fail","best","less","more","fine","fair","calm","wild","dark","light","strong","weak","clear","clean","dirty","sharp","sweet","bitter","warm","cool","simple","cheap","heavy","thin","round","square","empty","full","quiet","loud","rough","plain","bright","smart","kind","ok","hey","yes","nope","yeah","nah","mmm","whoa","soon","thus","yet","ago","item","zone","data","name","word"];
+const WMap = {}; WList.forEach((w,i)=>WMap[w]=i);
+
+let groups = [];
+
+function render() {
+  const wrap = document.getElementById('groupsWrap');
+  wrap.innerHTML = '';
+  groups.forEach((g, gi) => {
+    const div = document.createElement('div');
+    div.className = 'group';
+    div.innerHTML = `
+      <h3>
+        <span contenteditable="true" oninput="renameGroup(${gi}, this.innerText)">${escapeHtml(g.name)}</span>
+        <div class="row-actions">
+          <button class="btn" onclick="addStat(${gi})">+ Stat</button>
+          <button class="btn" onclick="randomizeGroup(${gi})">Randomize</button>
+          <button class="btn" onclick="removeGroup(${gi})">Remove</button>
+        </div>
+      </h3>
+      <table>
+        <thead><tr><th>Stat</th><th style="width:90px">Bits</th><th style="width:110px">Default / Value</th><th style="width:130px">Actions</th></tr></thead>
+        <tbody id="tbody-${gi}"></tbody>
+      </table>
+    `;
+    wrap.appendChild(div);
+
+    const tbody = div.querySelector(`#tbody-${gi}`);
+    g.fields.forEach((f, fi) => {
+      const tr = document.createElement('tr');
+      const noteVisible = f.noteVisible ? 'visible' : '';
+      tr.innerHTML = `
+        <td>
+          <input type="text" value="${escapeHtml(f.name)}" oninput="updateStat(${gi},${fi}, 'name', this.value)" />
+          <div class="note-container ${noteVisible}" id="note-${gi}-${fi}">
+            <textarea class="note" placeholder="Add notes about this stat..." oninput="updateStat(${gi},${fi}, 'note', this.value)">${escapeHtml(f.note || '')}</textarea>
+          </div>
+        </td>
+        <td><input class="small" type="number" value="${f.bits}" min="1" oninput="updateStat(${gi},${fi}, 'bits', this.value)" /></td>
+        <td><input type="number" value="${f.value}" oninput="updateStat(${gi},${fi}, 'value', this.value)" /></td>
+        <td>
+          <div class="row-actions">
+            <button class="btn" onclick="toggleNote(${gi},${fi})">Note</button>
+            <button class="btn" onclick="setMax(${gi},${fi})">Max</button>
+            <button class="btn" onclick="removeStat(${gi},${fi})">Del</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  });
+
+  updateTotals();
+  updateICWords();
+}
+
+function escapeHtml(s){ return String(s || '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+function addGroup(name='New Block') {
+  groups.push({name: name, fields: []});
+  render();
+}
+function removeGroup(idx) {
+  if (!confirm('Remove this group?')) return;
+  groups.splice(idx,1);
+  render();
+}
+function renameGroup(idx, name) {
+  groups[idx].name = name.trim() || 'Group';
+  updateTotals();
+}
+function addStat(groupIndex, name='stat', bits=8, val=0) {
+  const g = groups[groupIndex];
+  g.fields.push({name, bits:Number(bits), value:Number(val), note:'', noteVisible:false});
+  render();
+}
+function removeStat(g, f) {
+  groups[g].fields.splice(f,1);
+  render();
+}
+function updateStat(g, f, key, val) {
+  const field = groups[g].fields[f];
+  if (!field) return;
+  if (key === 'name') field.name = val;
+  else if (key === 'bits') {
+    field.bits = Math.max(1, parseInt(val) || 1);
+    const max = Math.pow(2, field.bits) - 1;
+    if (field.value > max) field.value = max;
+  } else if (key === 'value') {
+    field.value = Number(val) || 0;
+  } else if (key === 'note') {
+    field.note = val;
+  }
+  updateTotals();
+}
+function toggleNote(g,f){
+  const fld = groups[g].fields[f];
+  fld.noteVisible = !fld.noteVisible;
+  render();
+}
+
+function setMax(g,f) {
+  const fld = groups[g].fields[f];
+  const max = Math.pow(2, fld.bits)-1;
+  fld.value = max;
+  render();
+}
+
+function addSample(){
+  addGroup('Physical');
+  addStat(groups.length-1, 'Strength', 4, 2);
+  addStat(groups.length-1, 'Stamina', 4, 3);
+  addStat(groups.length-1, 'Health', 8, 100);
+
+  addGroup('Mental');
+  addStat(groups.length-1, 'Intelligence', 7, 12);
+  addStat(groups.length-1, 'Focus', 8, 50);
+
+  addGroup('Combat');
+  addStat(groups.length-1, 'CritChance', 7, 10);
+  addStat(groups.length-1, 'Evasion', 7, 5);
+  render();
+}
+
+function randomizeGroup(gi) {
+  const g = groups[gi];
+  g.fields.forEach(f => {
+    const max = Math.pow(2, f.bits) - 1;
+    f.value = Math.floor(Math.random() * (max + 1));
+  });
+  render();
+}
+function randomizeAll() {
+  groups.forEach((g, i) => randomizeGroup(i));
+  render();
+}
+
+function getAllFieldsInOrder() {
+  const arr = [];
+  groups.forEach(g => g.fields.forEach(f => arr.push(f)));
+  return arr;
+}
+function updateTotals() {
+  const all = getAllFieldsInOrder();
+  const totalBits = all.reduce((s,f)=>s + Number(f.bits || 0), 0);
+  document.getElementById('totalBits').innerText = totalBits;
+  const totalWords = Math.ceil(totalBits / 8);
+  document.getElementById('totalWords').innerText = totalWords;
+  const arrString = all.map(f => Number(f.bits || 0)).join(',');
+  const jsArray = `const IC_BIT_LENGTHS = [${arrString}];`;
+  document.getElementById('bitArray').innerText = jsArray || 'const IC_BIT_LENGTHS = [];';
+}
+
+function toBinaryFixed(n, bits) {
+  let v = Number(n) || 0;
+  if (v < 0) v = 0;
+  if (bits >= 31) {
+    let s = v.toString(2);
+    if (s.length > bits) s = s.slice(-bits);
+    return s.padStart(bits, '0');
+  }
+  const max = (1 << bits) - 1;
+  v = v & max;
+  return v.toString(2).padStart(bits, '0').slice(-bits);
+}
+
+function getPackedWordsFromCurrent() {
+  const all = getAllFieldsInOrder();
+  if (all.length === 0) return [];
+  let bitstream = '';
+  for (let i=0;i<all.length;i++){
+    const bits = Number(all[i].bits || 0);
+    let v = Number(all[i].value || 0);
+    const max = (bits >= 31) ? (Math.pow(2,bits)-1) : ((1<<bits)-1);
+    v = Math.max(0, Math.min(max, Math.floor(v)));
+    bitstream += toBinaryFixed(v, bits);
+  }
+  const pad = (8 - (bitstream.length % 8)) % 8;
+  if (pad) bitstream += '0'.repeat(pad);
+  const words = [];
+  for (let i=0;i<bitstream.length;i+=8){
+    const byteStr = bitstream.slice(i, i+8);
+    const idx = parseInt(byteStr,2);
+    const safeIdx = (idx >= 0 && idx < WList.length) ? idx : 0;
+    words.push(WList[safeIdx]);
+  }
+  return words;
+}
+
+function updateICWords() {
+  const words = getPackedWordsFromCurrent();
+  const icWordsEl = document.getElementById('icWords');
+  if (!words || words.length === 0) {
+    icWordsEl.innerText = '(no words yet)';
+    return;
+  }
+  icWordsEl.innerText = '[' + words.join(' ') + ']';
+}
+
+function copyICWords() {
+  const txt = document.getElementById('icWords').innerText;
+  if (!txt || txt === '(no words yet)') { alert('Nothing to copy'); return; }
+  navigator.clipboard.writeText(txt).then(()=>alert('Copied ICWORDS to clipboard'), ()=>alert('Copy failed'));
+}
+
+function generateEchoPreview() {
+  const all = getAllFieldsInOrder();
+  if (all.length === 0) { alert('No fields defined'); return; }
+  const bitLengths = all.map(f => Number(f.bits || 0));
+  const values = all.map(f => Number(f.value || 0));
+  let bitstream = '';
+  for (let i=0;i<values.length;i++){
+    const bits = bitLengths[i];
+    let v = values[i] || 0;
+    const max = Math.pow(2,bits)-1;
+    v = Math.max(0, Math.min(max, Math.floor(v)));
+    bitstream += v.toString(2).padStart(bits,'0');
+  }
+  const pad = (8 - (bitstream.length % 8)) % 8;
+  if (pad) bitstream += '0'.repeat(pad);
+  const bytes = [];
+  for (let i=0;i<bitstream.length;i+=8) bytes.push(bitstream.slice(i,i+8));
+  const byteVals = bytes.map(b => parseInt(b,2));
+  const preview = [
+    `Fields: ${all.length}`,
+    `Total bits: ${bitstream.length - pad} (+${pad} pad)`,
+    `Bytes: ${bytes.length}`,
+    `Byte values (0-255): ${byteVals.join(' ')}`,
+    `IC_BIT_LENGTHS: [${bitLengths.join(',')}]`
+  ].join('\n');
+  alert(preview);
+}
+
+addGroup('Physical');
+addStat(0,'Health',8,100);
+addStat(0,'Stamina',3,4);
+addStat(0,'Strength',4,3);
+addGroup('Mental');
+addStat(1,'Intelligence',7,10);
+addStat(1,'Focus',8,60);
+render();
+</script>
+</body>
+</html>
